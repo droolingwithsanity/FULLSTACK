@@ -1,0 +1,157 @@
+import { useState, useRef, useEffect } from "react";
+import Visualization from "./Visualizer";
+
+export default function App() {
+  const [messages, setMessages] = useState([]);
+  const [input, setInput] = useState("");
+  const [aiState, setAiState] = useState("idle");
+
+  const bottomRef = useRef(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, aiState]);
+
+  const send = async () => {
+    if (!input.trim()) return;
+
+    const text = input;
+    setInput("");
+
+    // Add user message
+    setMessages((m) => [...m, { role: "user", text }]);
+
+    setAiState("thinking");
+
+    const res = await fetch("/chat", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({ prompt: text })
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+
+    let buffer = "";
+
+    // Add empty assistant message (for streaming)
+    setMessages((m) => [...m, { role: "assistant", text: "" }]);
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // 🔥 DONE SIGNAL
+      if (buffer.includes("[DONE]")) {
+        buffer = buffer.replace("[DONE]", "");
+
+        setMessages((m) => {
+          const updated = [...m];
+          updated[updated.length - 1].text = buffer;
+          return updated;
+        });
+
+        setAiState("idle");
+        break;
+      }
+
+      // Stream update
+      setMessages((m) => {
+        const updated = [...m];
+        updated[updated.length - 1].text = buffer;
+        return updated;
+      });
+    }
+
+    setAiState("idle");
+  };
+
+  return (
+    <div style={styles.page}>
+      {/* 🧠 VISUAL BRAIN */}
+      <Visualization state={aiState} />
+
+      {/* 💬 CHAT */}
+      <div style={styles.chat}>
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            style={{
+              ...styles.msg,
+              alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+              background:
+                m.role === "user" ? "#e0f2ff" : "#f4f4f4"
+            }}
+          >
+            {m.text}
+          </div>
+        ))}
+
+        {aiState === "thinking" && (
+          <div style={styles.typing}>🧠 Lilly is thinking...</div>
+        )}
+
+        <div ref={bottomRef} />
+      </div>
+
+      {/* INPUT */}
+      <div style={styles.inputBar}>
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && send()}
+          placeholder="Message Lilly..."
+          style={styles.input}
+        />
+      </div>
+    </div>
+  );
+}
+
+const styles = {
+  page: {
+    height: "100vh",
+    display: "flex",
+    flexDirection: "column",
+    background: "white",
+    fontFamily: "system-ui"
+  },
+
+  chat: {
+    flex: 1,
+    padding: 20,
+    display: "flex",
+    flexDirection: "column",
+    gap: 12,
+    overflowY: "auto"
+  },
+
+  msg: {
+    maxWidth: "700px",
+    padding: "10px 14px",
+    borderRadius: 10,
+    fontSize: 16
+  },
+
+  typing: {
+    color: "#888",
+    fontStyle: "italic"
+  },
+
+  inputBar: {
+    borderTop: "1px solid #eee",
+    padding: 12
+  },
+
+  input: {
+    width: "100%",
+    padding: 14,
+    border: "none",
+    outline: "none",
+    fontSize: 16
+  }
+};
